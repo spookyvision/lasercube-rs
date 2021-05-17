@@ -13,7 +13,7 @@ fn main() -> Result<()> {
     let (device, descriptor) = LaserCube::dd_from_context(it.iter())?;
 
     let mut lc = LaserCube::new(device, descriptor)?;
-    lc.set_dac_rate(300)?;
+    lc.set_dac_rate(30000)?;
 
     const NUM_POINTS: usize = 200;
 
