@@ -1,21 +1,15 @@
-#![allow(unused_imports)]
-
 use anyhow::{anyhow, Context, Result};
-use core::panic;
-use libusb::{
-    self, Device, DeviceDescriptor, DeviceHandle, DeviceList, Devices, Direction, TransferType,
-};
+use libusb::{self, Device, DeviceDescriptor, DeviceHandle, Devices, Direction, TransferType};
 use std::{
     convert::TryInto,
-    mem,
     ops::{Deref, DerefMut},
     time::Duration,
 };
 use thiserror::Error;
 
-use log::{debug, error, info, log_enabled, warn};
+use log::{debug, error, info, log_enabled};
 
-use bytemuck::{cast_slice, Pod, TransparentWrapper, Zeroable};
+use bytemuck::{cast_slice, Pod, Zeroable};
 
 #[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
@@ -393,6 +387,7 @@ fn find_bulk_endpoint(
     None
 }
 
+// unused; just here to list everything a device has to offer
 fn find_bulk_endpoints(
     device: &mut libusb::Device,
     device_desc: &libusb::DeviceDescriptor,

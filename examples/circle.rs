@@ -17,6 +17,8 @@ fn main() -> Result<()> {
 
     const NUM_POINTS: usize = 200;
 
+    // instead of dealing with a ring buffer we'll just create two circles one after another
+    // and send a slice of that
     let mut circle: Vec<LaserdockSample> = Vec::with_capacity(NUM_POINTS * 2);
 
     for i in 0..2 * NUM_POINTS {
