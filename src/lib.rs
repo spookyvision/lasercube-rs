@@ -359,12 +359,6 @@ impl<'usb> LaserCube<'usb> {
     }
 }
 
-impl<'usb> Drop for LaserCube<'usb> {
-    fn drop(&mut self) {
-        //self.disable_output().unwrap();
-        //assert!(!self.output_enabled().unwrap());
-    }
-}
 fn find_bulk_endpoint(
     device: &mut libusb::Device,
     device_desc: &libusb::DeviceDescriptor,
@@ -448,22 +442,4 @@ fn configure_endpoint<'a>(
     handle.claim_interface(endpoint.iface)?;
     handle.set_alternate_setting(endpoint.iface, endpoint.setting)?;
     Ok(())
-}
-
-#[test]
-fn dome() -> Result<()> {
-    let context = libusb::Context::new()?;
-    let it = context.devices()?;
-    let (device, descriptor) = LaserCube::dd_from_context(it.iter())?;
-
-    let mut lc = LaserCube::new(device, descriptor)?;
-
-    Ok(())
-}
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }
