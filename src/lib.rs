@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use libusb::{self, Device, DeviceDescriptor, DeviceHandle, Devices, Direction, TransferType};
 use std::{
     convert::TryInto,
@@ -11,6 +11,7 @@ use log::{debug, error, info, log_enabled};
 
 use bytemuck::{cast_slice, Pod, Zeroable};
 
+pub const BYTES_PER_BATCH: usize = 64;
 #[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 struct XY(u16);
@@ -79,11 +80,11 @@ enum GetCommand {
     VersionMinor = 0x8c,
 }
 
-struct Buf([u8; 64]);
+struct Buf([u8; BYTES_PER_BATCH]);
 
 impl Buf {
     fn new() -> Self {
-        Buf([0; 64])
+        Buf([0; BYTES_PER_BATCH])
     }
 }
 
@@ -153,6 +154,7 @@ impl<'usb> LaserCube<'usb> {
 
     fn write_u32(&mut self, command: SetCommand, value: u32) -> Result<()> {
         let mut buf = Vec::with_capacity(5);
+
         buf.push(command as u8);
         buf.extend_from_slice(&value.to_le_bytes());
         self.write_buf(&buf)?;
