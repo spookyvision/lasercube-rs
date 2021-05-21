@@ -1,5 +1,5 @@
 [package]
-name = "lasercube-rs"
+name = "lasercube"
 version = "0.1.0"
 authors = ["Anatol Ulrich <anatol.ulrich@ferrous-systems.com>"]
 edition = "2018"

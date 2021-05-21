@@ -2,7 +2,7 @@ use std::{f64::consts::PI, mem::size_of};
 
 use anyhow::Result;
 use bytemuck::cast_slice;
-use lasercube_rs::*;
+use lasercube::*;
 use libusb::Context;
 use log::debug;
 fn main() -> Result<()> {
