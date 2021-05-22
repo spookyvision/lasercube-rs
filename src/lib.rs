@@ -1,5 +1,8 @@
 use anyhow::{anyhow, Context, Error, Result};
-use libusb::{self, Device, DeviceDescriptor, DeviceHandle, Devices, Direction, TransferType};
+use rusb::{
+    Device, DeviceDescriptor, DeviceHandle, Direction, EndpointDescriptor, GlobalContext,
+    TransferType,
+};
 use std::{
     convert::TryInto,
     ops::{Deref, DerefMut},
@@ -54,14 +57,6 @@ impl LaserdockSample {
             y: y.into(),
         }
     }
-}
-pub struct LaserCube<'usb> {
-    control_handle: DeviceHandle<'usb>,
-    data_handle: DeviceHandle<'usb>,
-    control_read: Endpoint,
-    control_write: Endpoint,
-    data_write: Endpoint,
-    descriptor: DeviceDescriptor,
 }
 
 enum SetCommand {
@@ -126,24 +121,98 @@ pub enum BusError {
     UnexpectedContent(u8, u8),
 }
 
-impl<'usb> LaserCube<'usb> {
+pub struct LaserCube {
+    device: DeviceHandle<GlobalContext>,
+    control_read: u8,
+    control_write: u8,
+    data_write: u8,
+}
+
+impl LaserCube {
     const USB_VENDOR_ID: u16 = 0x1fc9;
     const USB_PRODUCT_ID: u16 = 0x04d8;
-
+    const CONTROL_INTERFACE: u8 = 0;
+    const DATA_INTERFACE: u8 = 1;
     const RECV_BUF_LEN: usize = 64;
-    pub fn usb_devices<'b, 'a: 'b>(
-        it: Devices<'a, 'b>,
-    ) -> impl Iterator<Item = (Device<'b>, DeviceDescriptor)> + 'b {
-        it.filter_map(|device| {
-            if let Ok(device_desc) = device.device_descriptor() {
-                if device_desc.vendor_id() == Self::USB_VENDOR_ID
-                    && device_desc.product_id() == Self::USB_PRODUCT_ID
+
+    pub fn open_first() -> Result<LaserCube> {
+        let device = rusb::devices()?
+            .iter()
+            .filter_map(|device| {
+                let descriptor = device.device_descriptor().ok()?;
+                if descriptor.vendor_id() == Self::USB_VENDOR_ID
+                    && descriptor.product_id() == Self::USB_PRODUCT_ID
                 {
-                    return Some((device, device_desc));
+                    Some(device)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .ok_or(anyhow!("LaserCube not found"))?;
+
+        let config_desc = device.config_descriptor(0)?;
+
+        let mut control_read = None;
+        let mut control_write = None;
+        let mut data_write = None;
+
+        let mut device = device.open()?;
+
+        device.claim_interface(Self::CONTROL_INTERFACE)?;
+        device.claim_interface(Self::DATA_INTERFACE)?;
+
+        for interface in config_desc.interfaces() {
+            for interface_desc in interface.descriptors() {
+                if interface_desc.interface_number() == Self::CONTROL_INTERFACE {
+                    for endpoint_desc in interface_desc.endpoint_descriptors() {
+                        if endpoint_desc.direction() == Direction::In {
+                            control_read = Some(endpoint_desc.address())
+                        } else if endpoint_desc.direction() == Direction::Out {
+                            control_write = Some(endpoint_desc.address());
+                        }
+                    }
+                }
+
+                if interface_desc.interface_number() == Self::DATA_INTERFACE {
+                    for endpoint_desc in interface_desc.endpoint_descriptors() {
+                        if endpoint_desc.transfer_type() == TransferType::Bulk {
+                            device.set_alternate_setting(
+                                Self::DATA_INTERFACE,
+                                interface_desc.setting_number(),
+                            )?;
+
+                            data_write = Some(endpoint_desc.address());
+                        }
+                    }
                 }
             }
-            None
-        })
+        }
+
+        let control_read = control_read.ok_or(anyhow!("control interface not found"))?;
+        let control_write = control_write.ok_or(anyhow!("control interface not found"))?;
+        let data_write = data_write.ok_or(anyhow!("data interface not found"))?;
+
+        let mut laser_cube = LaserCube {
+            device: device,
+            control_read,
+            control_write,
+            data_write,
+        };
+
+        if log_enabled!(log::Level::Debug) {
+            laser_cube.diagnostics()?
+        }
+
+        laser_cube.clear_ringbuffer()?;
+        laser_cube.enable_output()?;
+        if !laser_cube.output_enabled()? {
+            return Err(anyhow!("failed to enable output"));
+        } else {
+            info!("Output enabled!")
+        }
+
+        Ok(laser_cube)
     }
 
     fn read<T: From<Buf>>(&mut self, command: GetCommand) -> Result<T> {
@@ -170,8 +239,8 @@ impl<'usb> LaserCube<'usb> {
         let timeout = Duration::from_secs(1);
 
         let written = self
-            .control_handle
-            .write_bulk(self.control_write.address, &buf, timeout)
+            .device
+            .write_bulk(self.control_write, &buf, timeout)
             .context("write_bulk")?;
 
         if written != buf.len() {
@@ -180,8 +249,8 @@ impl<'usb> LaserCube<'usb> {
 
         let mut recv = Buf::new();
         let read = self
-            .control_handle
-            .read_bulk(self.control_read.address, &mut recv, timeout)
+            .device
+            .read_bulk(self.control_read, &mut recv, timeout)
             .context("read_bulk")?;
 
         if read != LaserCube::RECV_BUF_LEN {
@@ -193,6 +262,22 @@ impl<'usb> LaserCube<'usb> {
         }
 
         Ok(recv)
+    }
+
+    pub fn send_samples(&mut self, buf: &[LaserdockSample]) -> Result<()> {
+        self.send(cast_slice(buf))
+    }
+
+    pub fn send(&mut self, buf: &[u8]) -> Result<()> {
+        let timeout = Duration::from_secs(1);
+
+        let written = self.device.write_bulk(self.data_write, &buf, timeout)?;
+
+        if written != buf.len() {
+            return Err(BusError::IncompleteWrite(written, buf.len()).into());
+        }
+
+        Ok(())
     }
 
     pub fn max_dac_rate(&mut self) -> Result<u32> {
@@ -209,77 +294,6 @@ impl<'usb> LaserCube<'usb> {
         self.write_u32(SetCommand::DacRate, rate.clamp(min, max))
     }
 
-    pub fn send_samples(&mut self, buf: &[LaserdockSample]) -> Result<()> {
-        self.send(cast_slice(buf))
-    }
-
-    pub fn send(&mut self, buf: &[u8]) -> Result<()> {
-        let timeout = Duration::from_secs(1);
-
-        let written = self
-            .data_handle
-            .write_bulk(self.data_write.address, &buf, timeout)?;
-
-        if written != buf.len() {
-            return Err(BusError::IncompleteWrite(written, buf.len()).into());
-        }
-
-        Ok(())
-    }
-
-    pub fn dd_from_context<'b, 'a: 'b>(
-        it: Devices<'a, 'b>,
-    ) -> Result<(Device<'b>, DeviceDescriptor)> {
-        Self::usb_devices(it)
-            .next()
-            .ok_or(anyhow!("could not find a Las0r"))
-    }
-
-    pub fn new(mut device: Device<'usb>, descriptor: DeviceDescriptor) -> Result<Self> {
-        let mut control_handle = device.open()?;
-
-        let mut data_handle = device.open()?;
-
-        //find_bulk_endpoints(&mut device, &descriptor);
-        let control_read = find_bulk_endpoint(&mut device, &descriptor, 0, Direction::In)
-            .ok_or(anyhow!("did not find control endpoint"))?;
-
-        let control_write = find_bulk_endpoint(&mut device, &descriptor, 0, Direction::Out)
-            .ok_or(anyhow!("did not find control endpoint"))?;
-
-        configure_endpoint(&mut control_handle, &control_read)?;
-        configure_endpoint(&mut control_handle, &control_write)?;
-
-        let data_write = find_bulk_endpoint(&mut device, &descriptor, 1, Direction::Out)
-            .ok_or(anyhow!("did not find data endpoint"))?;
-
-        configure_endpoint(&mut data_handle, &data_write)?;
-        //data_handle.set_alternate_setting(1, 1)?;
-
-        let mut laser_cube = Self {
-            control_handle,
-            data_handle,
-            control_read,
-            control_write,
-            data_write,
-            descriptor,
-        };
-
-        if log_enabled!(log::Level::Debug) {
-            laser_cube.diagnostics()?
-        }
-
-        laser_cube.clear_ringbuffer()?;
-        laser_cube.enable_output()?;
-        if !laser_cube.output_enabled()? {
-            return Err(anyhow!("failed to enable output"));
-        } else {
-            info!("Output enabled!")
-        }
-
-        Ok(laser_cube)
-    }
-
     pub fn clear_ringbuffer(&mut self) -> Result<()> {
         debug!("clearing ring buffer");
         self.write_u8(SetCommand::ClearRingBuffer, 0)
@@ -291,7 +305,7 @@ impl<'usb> LaserCube<'usb> {
         Ok(())
     }
 
-    pub fn output_enabled(&mut self) -> Result<(bool)> {
+    pub fn output_enabled(&mut self) -> Result<bool> {
         Ok(true)
     }
 
@@ -303,8 +317,8 @@ impl<'usb> LaserCube<'usb> {
 
     pub fn diagnostics(&mut self) -> Result<()> {
         let timeout = Duration::from_secs(1);
-        let device_handle = &self.control_handle;
-        let descriptor = &self.descriptor;
+        let device_handle = &self.device;
+        let descriptor = &device_handle.device().device_descriptor()?;
 
         let languages = device_handle.read_languages(timeout)?;
 
@@ -355,88 +369,8 @@ impl<'usb> LaserCube<'usb> {
     }
 }
 
-fn find_bulk_endpoint(
-    device: &mut libusb::Device,
-    device_desc: &libusb::DeviceDescriptor,
-    interface_number: u8,
-    direction: Direction,
-) -> Option<Endpoint> {
-    for n in 0..device_desc.num_configurations() {
-        let config_desc = match device.config_descriptor(n) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        for interface in config_desc.interfaces() {
-            for interface_desc in interface.descriptors() {
-                for endpoint_desc in interface_desc.endpoint_descriptors() {
-                    if endpoint_desc.direction() == direction
-                        && endpoint_desc.transfer_type() == TransferType::Bulk
-                        && interface_desc.interface_number() == interface_number
-                    {
-                        return Some(Endpoint {
-                            config: config_desc.number(),
-                            iface: interface_desc.interface_number(),
-                            setting: interface_desc.setting_number(),
-                            address: endpoint_desc.address(),
-                        });
-                    }
-                }
-            }
-        }
+impl Default for LaserCube {
+    fn default() -> Self {
+        Self::open_first().unwrap()
     }
-
-    None
-}
-
-// unused; just here to list everything a device has to offer
-fn find_bulk_endpoints(
-    device: &mut libusb::Device,
-    device_desc: &libusb::DeviceDescriptor,
-) -> Option<Endpoint> {
-    for n in 0..device_desc.num_configurations() {
-        let config_desc = match device.config_descriptor(n) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        for interface in config_desc.interfaces() {
-            for interface_desc in interface.descriptors() {
-                for endpoint_desc in interface_desc.endpoint_descriptors() {
-                    if endpoint_desc.transfer_type() == TransferType::Bulk {
-                        let p = Endpoint {
-                            config: config_desc.number(),
-                            iface: interface_desc.interface_number(),
-                            setting: interface_desc.setting_number(),
-                            address: endpoint_desc.address(),
-                        };
-
-                        println!("found {:#?} {:#?}", p, endpoint_desc.direction());
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-#[derive(Debug)]
-struct Endpoint {
-    config: u8,
-    iface: u8,
-    setting: u8,
-    address: u8,
-}
-
-fn configure_endpoint<'a>(
-    handle: &'a mut libusb::DeviceHandle,
-    endpoint: &Endpoint,
-) -> libusb::Result<()> {
-    debug!("configure endpoint {:#?}", endpoint);
-    //handle.reset()?;
-    handle.set_active_configuration(endpoint.config)?;
-    handle.claim_interface(endpoint.iface)?;
-    handle.set_alternate_setting(endpoint.iface, endpoint.setting)?;
-    Ok(())
 }

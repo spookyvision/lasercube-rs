@@ -3,16 +3,11 @@ use std::{f64::consts::PI, mem::size_of};
 use anyhow::Result;
 use bytemuck::cast_slice;
 use lasercube::*;
-use libusb::Context;
 use log::debug;
 fn main() -> Result<()> {
     pretty_env_logger::init();
 
-    let context = Context::new()?;
-    let it = context.devices()?;
-    let (device, descriptor) = LaserCube::dd_from_context(it.iter())?;
-
-    let mut lc = LaserCube::new(device, descriptor)?;
+    let mut lc = LaserCube::open_first()?;
     lc.set_dac_rate(30000)?;
 
     const NUM_POINTS: usize = 200;

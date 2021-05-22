@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.40"
 bytemuck = {version = "1.5.1", features = ["derive"]}
-libusb = "0.3.0"
 log = "0.4"
 pretty_env_logger = "0.4"
+rusb = "0.8.0"
 thiserror = "1.0.24"
