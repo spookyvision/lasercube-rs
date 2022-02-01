@@ -1,10 +1,8 @@
 use anyhow::{anyhow, Context, Error, Result};
-use rusb::{
-    Device, DeviceDescriptor, DeviceHandle, Direction, EndpointDescriptor, GlobalContext,
-    TransferType,
-};
+use rusb::{DeviceHandle, Direction, EndpointDescriptor, GlobalContext, TransferType};
 use std::{
     convert::TryInto,
+    mem::size_of,
     ops::{Deref, DerefMut},
     time::Duration,
 };
@@ -15,12 +13,12 @@ use log::{debug, error, info, log_enabled};
 use bytemuck::{cast_slice, Pod, Zeroable};
 
 pub const BYTES_PER_BATCH: usize = 64;
-#[derive(Copy, Clone, Pod, Zeroable)]
+#[derive(Copy, Clone, Pod, Zeroable, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 #[repr(C)]
-struct XY(u16);
+pub struct XY(pub u16);
 
 impl XY {
-    fn flip(self) -> Self {
+    pub fn flip(self) -> Self {
         XY(4095 - self.0)
     }
 }
@@ -48,13 +46,20 @@ pub struct LaserdockSample {
     y: XY,
 }
 
+pub const SAMPLE_SIZE: usize = size_of::<LaserdockSample>() / size_of::<u8>();
+pub const SAMPLES_PER_BATCH: usize = BYTES_PER_BATCH / SAMPLE_SIZE;
+
 impl LaserdockSample {
     pub fn new(r: u8, g: u8, b: u8, x: f64, y: f64) -> LaserdockSample {
+        Self::new_xy(r, g, b, x.into(), y.into())
+    }
+
+    pub fn new_xy(r: u8, g: u8, b: u8, x: XY, y: XY) -> LaserdockSample {
         LaserdockSample {
             rg: r as u16 | (g as u16) << 8,
             b: b as u16,
-            x: x.into(),
-            y: y.into(),
+            x,
+            y,
         }
     }
 }
@@ -215,7 +220,7 @@ impl LaserCube {
         Ok(laser_cube)
     }
 
-    fn read<T: From<Buf>>(&mut self, command: GetCommand) -> Result<T> {
+    fn read<T: From<Buf>>(&self, command: GetCommand) -> Result<T> {
         let recv = self.write_buf(&[command as u8])?;
 
         Ok(recv.into())
@@ -235,7 +240,7 @@ impl LaserCube {
         Ok(())
     }
 
-    fn write_buf(&mut self, buf: &[u8]) -> Result<Buf> {
+    fn write_buf(&self, buf: &[u8]) -> Result<Buf> {
         let timeout = Duration::from_secs(1);
 
         let written = self
@@ -264,11 +269,11 @@ impl LaserCube {
         Ok(recv)
     }
 
-    pub fn send_samples(&mut self, buf: &[LaserdockSample]) -> Result<()> {
+    pub fn send_samples(&self, buf: &[LaserdockSample]) -> Result<()> {
         self.send(cast_slice(buf))
     }
 
-    pub fn send(&mut self, buf: &[u8]) -> Result<()> {
+    pub fn send(&self, buf: &[u8]) -> Result<()> {
         let timeout = Duration::from_secs(1);
 
         let written = self.device.write_bulk(self.data_write, &buf, timeout)?;
@@ -280,12 +285,16 @@ impl LaserCube {
         Ok(())
     }
 
-    pub fn max_dac_rate(&mut self) -> Result<u32> {
+    pub fn max_dac_rate(&self) -> Result<u32> {
         self.read::<u32>(GetCommand::MaxDacRate)
     }
 
-    pub fn min_dac_rate(&mut self) -> Result<u32> {
+    pub fn min_dac_rate(&self) -> Result<u32> {
         self.read::<u32>(GetCommand::MinDacRate)
+    }
+
+    pub fn dac_rate(&self) -> Result<u32> {
+        self.read::<u32>(GetCommand::DacRate)
     }
 
     pub fn set_dac_rate(&mut self, rate: u32) -> Result<()> {
@@ -305,17 +314,17 @@ impl LaserCube {
         Ok(())
     }
 
-    pub fn output_enabled(&mut self) -> Result<bool> {
-        Ok(true)
-    }
-
     pub fn disable_output(&mut self) -> Result<()> {
         debug!("disabling output");
         self.write_u8(SetCommand::EnableOutput, 0)?;
         Ok(())
     }
 
-    pub fn diagnostics(&mut self) -> Result<()> {
+    pub fn output_enabled(&self) -> Result<bool> {
+        Ok(true)
+    }
+
+    pub fn diagnostics(&self) -> Result<()> {
         let timeout = Duration::from_secs(1);
         let device_handle = &self.device;
         let descriptor = &device_handle.device().device_descriptor()?;
@@ -359,7 +368,7 @@ impl LaserCube {
 
         debug!("min dac rate {}", self.min_dac_rate()?);
         debug!("max dac rate {}", self.max_dac_rate()?);
-        debug!("dac rate {}", self.read::<u32>(GetCommand::DacRate)?);
+        debug!("dac rate {}", self.dac_rate()?);
         debug!(
             "max dac value {}",
             self.read::<u32>(GetCommand::MaxDacValue)?
