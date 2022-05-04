@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Error, Result};
+use lasy::{Blanked, IsBlank, Lerp, Position, Weight};
 use rusb::{DeviceHandle, Direction, EndpointDescriptor, GlobalContext, TransferType};
 use std::{
     convert::TryInto,
@@ -37,13 +38,62 @@ impl From<f64> for XY {
     }
 }
 
-#[derive(Copy, Clone, Pod, Zeroable)]
+#[derive(Copy, Clone, Pod, Zeroable, Hash)]
 #[repr(C)]
 pub struct LaserdockSample {
     rg: u16,
     b: u16,
     x: XY,
     y: XY,
+}
+
+impl IsBlank for LaserdockSample {
+    fn is_blank(&self) -> bool {
+        self.rg == 0 && self.b == 0
+    }
+}
+
+impl Lerp for LaserdockSample {
+    type Scalar = f32;
+
+    fn lerp(&self, dest: &Self, amt: Self::Scalar) -> Self {
+        fn lerp_u16(a: u16, b: u16, amount: f32) -> u16 {
+            a + (((b - a) as f32) * amount).round() as u16
+        }
+
+        LaserdockSample {
+            rg: lerp_u16(self.rg, dest.rg, amt),
+            b: lerp_u16(self.b, dest.b, amt),
+            x: XY(lerp_u16(self.x.0, dest.x.0, amt)),
+            y: XY(lerp_u16(self.y.0, dest.y.0, amt)),
+        }
+    }
+}
+
+impl Blanked for LaserdockSample {
+    fn blanked(&self) -> Self {
+        let mut blank = *self;
+        blank.rg = 0;
+        blank.b = 0;
+        blank
+    }
+}
+impl Position for LaserdockSample {
+    fn position(&self) -> [f32; 2] {
+        //XY((4095. * (f + 1.0) / 2.0) as u16)
+        // xy = 4095 * (f+1)/2
+        fn to_f(xy: XY) -> f32 {
+            (2.0 * (xy.0 as f32) - 4095.) / 4095.
+        }
+
+        [to_f(self.x), to_f(self.y)]
+    }
+}
+
+impl Weight for LaserdockSample {
+    fn weight(&self) -> u32 {
+        0
+    }
 }
 
 pub const SAMPLE_SIZE: usize = size_of::<LaserdockSample>() / size_of::<u8>();
