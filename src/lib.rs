@@ -11,33 +11,37 @@ use lasy::{Blanked, IsBlank, Lerp, Position, Weight};
 use log::{debug, error, info, log_enabled};
 use rusb::{DeviceHandle, Direction, GlobalContext, TransferType};
 use thiserror::Error;
+pub mod animation;
 
 pub const BYTES_PER_BATCH: usize = 64;
 #[derive(Copy, Clone, Pod, Zeroable, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 #[repr(C)]
 pub struct XY(pub u16);
 
+pub const XY_MIN: u16 = 0;
+pub const XY_MAX: u16 = 4095;
+
 impl XY {
     pub fn flip(self) -> Self {
-        XY(4095 - self.0)
+        XY(XY_MAX - self.0)
     }
 }
 
 impl From<f32> for XY {
     fn from(f: f32) -> Self {
         let f = f.clamp(-1., 1.);
-        XY((4095. * (f + 1.0) / 2.0) as u16)
+        XY((XY_MAX as f32 * (f + 1.0) / 2.0) as u16)
     }
 }
 
 impl From<f64> for XY {
     fn from(f: f64) -> Self {
         let f = f.clamp(-1., 1.);
-        XY((4095. * (f + 1.0) / 2.0) as u16)
+        XY((XY_MAX as f64 * (f + 1.0) / 2.0) as u16)
     }
 }
 
-#[derive(Copy, Clone, Pod, Zeroable, Hash)]
+#[derive(Copy, Clone, Pod, Zeroable, Hash, Debug)]
 #[repr(C)]
 pub struct LaserdockSample {
     rg: u16,
@@ -78,11 +82,10 @@ impl Blanked for LaserdockSample {
     }
 }
 impl Position for LaserdockSample {
+    // [-1..-1]
     fn position(&self) -> [f32; 2] {
-        //XY((4095. * (f + 1.0) / 2.0) as u16)
-        // xy = 4095 * (f+1)/2
         fn to_f(xy: XY) -> f32 {
-            (2.0 * (xy.0 as f32) - 4095.) / 4095.
+            (2.0 * (xy.0 as f32) - XY_MAX as f32) / XY_MAX as f32 + 1.
         }
 
         [to_f(self.x), to_f(self.y)]
