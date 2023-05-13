@@ -58,7 +58,7 @@ impl Lerp for LaserdockSample {
 
     fn lerp(&self, dest: &Self, amt: Self::Scalar) -> Self {
         fn lerp_u16(a: u16, b: u16, amount: f32) -> u16 {
-            a + (((b - a) as f32) * amount).round() as u16
+            a + ((b as f32 - a as f32) * amount).round() as u16
         }
 
         LaserdockSample {
