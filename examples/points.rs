@@ -3,7 +3,6 @@ use std::{f64::consts::PI, mem::size_of};
 use anyhow::Result;
 use bytemuck::cast_slice;
 use lasercube::{LaserCube, LaserdockSample, SAMPLES_PER_BATCH, SAMPLE_SIZE, XY};
-
 use lasy::{
     euler_graph_to_euler_circuit, interpolate_euler_circuit, point_graph_to_euler_graph,
     points_to_segments, segments_to_point_graph, InterpolationConfig,

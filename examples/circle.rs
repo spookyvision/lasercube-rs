@@ -1,3 +1,5 @@
+use std::{f64::consts::PI, mem::size_of};
+
 use anyhow::Result;
 use bytemuck::cast_slice;
 use lasercube::*;
@@ -6,7 +8,6 @@ use lasy::{
     points_to_segments, segments_to_point_graph, InterpolationConfig,
 };
 use log::debug;
-use std::{f64::consts::PI, mem::size_of};
 fn main() -> Result<()> {
     pretty_env_logger::init();
 

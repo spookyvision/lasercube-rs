@@ -1,17 +1,16 @@
-use anyhow::{anyhow, Context, Result};
-use lasy::{Blanked, IsBlank, Lerp, Position, Weight};
-use rusb::{DeviceHandle, Direction, GlobalContext, TransferType};
 use std::{
     convert::TryInto,
     mem::size_of,
     ops::{Deref, DerefMut},
     time::Duration,
 };
-use thiserror::Error;
 
-use log::{debug, error, info, log_enabled};
-
+use anyhow::{anyhow, Context, Result};
 use bytemuck::{cast_slice, Pod, Zeroable};
+use lasy::{Blanked, IsBlank, Lerp, Position, Weight};
+use log::{debug, error, info, log_enabled};
+use rusb::{DeviceHandle, Direction, GlobalContext, TransferType};
+use thiserror::Error;
 
 pub const BYTES_PER_BATCH: usize = 64;
 #[derive(Copy, Clone, Pod, Zeroable, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
