@@ -2,7 +2,7 @@ use std::{f64::consts::PI, mem::size_of};
 
 use anyhow::Result;
 use bytemuck::cast_slice;
-use lasercube::{LaserCube, LaserdockSample, SAMPLES_PER_BATCH, SAMPLE_SIZE};
+use lasercube::{LaserCube, LaserdockSample, SAMPLES_PER_BATCH, SAMPLE_SIZE, XY};
 
 use lasy::{
     euler_graph_to_euler_circuit, interpolate_euler_circuit, point_graph_to_euler_graph,
@@ -44,7 +44,25 @@ fn main() -> Result<()> {
             dir = !dir;
         }
     }
-    let input_points = points;
+
+    // let mut points = vec![];
+    // let p2s = [(0, 0), (2000, 0), (2000, 2000), (2000, 2000), (0, 0)];
+    // let p2s = [(0, 0), (2000, 0), (2000, 0)];
+
+    // for add in [0] {
+    //     for (x, y) in &p2s {
+    //         points.push(LaserdockSample::new_xy(0, 1, 2, XY(x + add), XY(y + add)));
+    //     }
+
+    //     points.push(LaserdockSample::new_xy(
+    //         0,
+    //         0,
+    //         0,
+    //         XY(p2s[p2s.len() - 1].0 * 2 + add),
+    //         XY(p2s[p2s.len() - 1].1 * 2 + add),
+    //     ));
+    // }
+    let input_points = points.clone();
     let segs = points_to_segments(&input_points);
     let pg = segments_to_point_graph(&input_points, segs);
     let eg = point_graph_to_euler_graph(&pg);
@@ -52,11 +70,8 @@ fn main() -> Result<()> {
     let output_points: Vec<LaserdockSample> =
         interpolate_euler_circuit(&input_points, &ec, &eg, 20, &InterpolationConfig::default());
 
-    let mut idx = 0;
-
-    println!("{}", output_points.len());
     loop {
-        for chunk in output_points.chunks(SAMPLES_PER_BATCH) {
+        for chunk in points.chunks(SAMPLES_PER_BATCH) {
             lc.send_samples(chunk)?;
         }
     }

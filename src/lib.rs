@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Context, Result};
 use lasy::{Blanked, IsBlank, Lerp, Position, Weight};
-use rusb::{DeviceHandle, Direction, EndpointDescriptor, GlobalContext, TransferType};
+use rusb::{DeviceHandle, Direction, GlobalContext, TransferType};
 use std::{
     convert::TryInto,
     mem::size_of,
